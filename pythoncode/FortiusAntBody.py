@@ -181,6 +181,7 @@ import antFE             as fe
 import antHRM            as hrm
 import antPWR            as pwr
 import antSCS            as scs
+import antCTRL           as ctrl
 import debug
 from   FortiusAntGui                import mode_Power, mode_Grade
 import logfile
@@ -345,7 +346,7 @@ def Runoff(self):
                             TacxTrainer.CurrentPower,     TacxTrainer.TargetMode, \
                             TacxTrainer.TargetPower,      TacxTrainer.TargetGrade, \
                             TacxTrainer.TargetResistance, TacxTrainer.HeartRate, \
-                            0)
+                            0, 0)
             if not rolldown or rolldown_time == 0:
                 self.SetMessages(Tacx=TacxTrainer.Message + " - Cycle to above 40kph (then stop)")
             else:
@@ -434,7 +435,7 @@ def Runoff(self):
     #---------------------------------------------------------------------------
     # Finalize
     #---------------------------------------------------------------------------
-    self.SetValues( 0, 0, 0,TacxTrainer.TargetMode, 0, 0, 0, 0, 0)
+    self.SetValues( 0, 0, 0,TacxTrainer.TargetMode, 0, 0, 0, 0, 0, 0)
     if not rolldown:
         self.SetMessages(Tacx=TacxTrainer.Message)
     if debug.on(debug.Any) and PowerCount > 0:
@@ -491,6 +492,14 @@ def Tacx2DongleSub(self, Restart):
     p71_Data2                   = 0xff
     p71_Data3                   = 0xff
     p71_Data4                   = 0xff
+
+    ctrl_p71_LastReceivedCommandID   = 255
+    ctrl_p71_SequenceNr              = 255
+    ctrl_p71_CommandStatus           = 255
+    ctrl_p71_Data1                   = 0xff
+    ctrl_p71_Data2                   = 0xff
+    ctrl_p71_Data3                   = 0xff
+    ctrl_p71_Data4                   = 0xff
 
     #---------------------------------------------------------------------------
     # Info from ANT slave channels
@@ -576,7 +585,10 @@ def Tacx2DongleSub(self, Restart):
         #-------------------------------------------------------------------
         AntDongle.SlaveSCS_ChannelConfig(clv.scs)
         pass
-    
+
+    AntDongle.CTRL_ChannelConfig(ant.DeviceNumber_CTRL)
+    ControlCommand = ant.CommandNr_CTRL['None']
+
     if not clv.gui: logfile.Console ("Ctrl-C to exit")
 
     #---------------------------------------------------------------------------
@@ -640,7 +652,7 @@ def Tacx2DongleSub(self, Restart):
 
                 self.SetValues(TacxTrainer.SpeedKmh, int(CountDown/4), \
                         round(TacxTrainer.CurrentPower * -1,0), \
-                        mode_Power, 0, 0, TacxTrainer.CurrentResistance * -1, 0, 0)
+                        mode_Power, 0, 0, TacxTrainer.CurrentResistance * -1, 0, 0, 0)
 
                 # --------------------------------------------------------------
                 # Average power over the last 20 readings
@@ -700,6 +712,7 @@ def Tacx2DongleSub(self, Restart):
     hrm.Initialize()
     pwr.Initialize()
     scs.Initialize()
+    ctrl.Initialize()
     
     #---------------------------------------------------------------------------
     # Initialize CycleTime: fast for PedalStrokeAnalysis
@@ -752,7 +765,7 @@ def Tacx2DongleSub(self, Restart):
             if clv.hrm == None:
                 HeartRate = TacxTrainer.HeartRate
                 # print('Use heartrate from trainer', HeartRate)
-            
+
             #-------------------------------------------------------------------
             # Show actual status
             #-------------------------------------------------------------------
@@ -764,7 +777,8 @@ def Tacx2DongleSub(self, Restart):
                             TacxTrainer.TargetGrade, \
                             TacxTrainer.TargetResistance, \
                             HeartRate, \
-                            TacxTrainer.Teeth)
+                            TacxTrainer.TeethFront, \
+                            TacxTrainer.TeethRear)
 
             #-------------------------------------------------------------------
             # Pedal Stroke Analysis
@@ -800,12 +814,18 @@ def Tacx2DongleSub(self, Restart):
                 elif TacxTrainer.Buttons == usbTrainer.CancelButton:    self.RunningSwitch = False
                 else:                                                   pass
             else:
-                if   TacxTrainer.Buttons == usbTrainer.EnterButton:     pass
-                elif TacxTrainer.Buttons == usbTrainer.DownButton:      TacxTrainer.SetPowercurveFactorDown()
-                elif TacxTrainer.Buttons == usbTrainer.OKButton:        TacxTrainer.ResetPowercurveFactor()
-                elif TacxTrainer.Buttons == usbTrainer.UpButton:        TacxTrainer.SetPowercurveFactorUp()
-                elif TacxTrainer.Buttons == usbTrainer.CancelButton:    self.RunningSwitch = False
+                if   TacxTrainer.Buttons == usbTrainer.EnterButton:     TacxTrainer.FrontShiftUp()
+                elif TacxTrainer.Buttons == usbTrainer.DownButton:      TacxTrainer.RearShiftDown()
+                elif TacxTrainer.Buttons == usbTrainer.OKButton:        pass
+                elif TacxTrainer.Buttons == usbTrainer.UpButton:        TacxTrainer.RearShiftUp()
+                elif TacxTrainer.Buttons == usbTrainer.CancelButton:    TacxTrainer.FrontShiftDown()
                 else:                                                   pass
+
+                if ControlCommand == ant.CommandNr_CTRL["MenuUp"]:      TacxTrainer.RearShiftUp()
+                elif ControlCommand == ant.CommandNr_CTRL['MenuDown']:  TacxTrainer.RearShiftDown()
+                elif ControlCommand == ant.CommandNr_CTRL['MenuSelect']: TacxTrainer.FrontShiftToggle()
+
+            ControlCommand = ant.CommandNr_CTRL['None']
 
             #-------------------------------------------------------------------
             # Do ANT work every 1/4 second
@@ -838,6 +858,11 @@ def Tacx2DongleSub(self, Restart):
                     messages.append(scs.BroadcastMessage( \
                         TacxTrainer.PedalEchoTime, TacxTrainer.PedalEchoCount, \
                         TacxTrainer.VirtualSpeedKmh, TacxTrainer.Cadence))
+
+                #---------------------------------------------------------------
+                # Broadcast Controllable message
+                #---------------------------------------------------------------
+                messages.append(ctrl.BroadcastControlMessage())
 
                 #---------------------------------------------------------------
                 # Broadcast TrainerData message to the CTP (Trainer Road, ...)
@@ -884,11 +909,10 @@ def Tacx2DongleSub(self, Restart):
                         # Data page 48 (0x30) Basic resistance
                         #-------------------------------------------------------
                         if   DataPageNumber == 48:
-                            logfile.Console('Data page 48 Basic mode not implemented')
-                            # I never saw this appear anywhere (2020-05-08)
-                            # TargetMode            = mode_Basic
-                            # TargetGradeFromDongle = 0
-                            # TargetPowerFromDongle = ant.msgUnpage48_BasicResistance(info) * 1000  # n % of maximum of 1000Watt
+                            TacxTrainer.SetGrade(ant.msgUnpage48_BasicResistance(info) * 20)
+                            TacxTrainer.SetRollingResistance(0.004)
+                            TacxTrainer.SetWind(0.51, 0.0, 1.0)
+
                             p71_LastReceivedCommandID   = DataPageNumber
                             p71_SequenceNr              = int(p71_SequenceNr + 1) & 0xff
                             p71_CommandStatus           = 0xff
@@ -1022,6 +1046,60 @@ def Tacx2DongleSub(self, Restart):
                         # Other data pages
                         #-------------------------------------------------------
                         else: error = "Unknown FE data page"
+
+
+                    #-----------------------------------------------------------
+                    # Control Channel inputs
+                    #-----------------------------------------------------------
+                    if Channel == ant.channel_CTRL:
+                        #-------------------------------------------------------
+                        # Data page 73 (0x53) Generic Command
+                        #-------------------------------------------------------
+                        if   DataPageNumber == 73:
+                            _SlaveSerialNumber, _SlaveManufacturerID, SequenceNr, CommandNr =\
+                                ant.msgUnpage73_GenericCommand(info)
+                            ControlCommand = CommandNr
+
+                            ctrl_p71_LastReceivedCommandID = DataPageNumber
+                            ctrl_p71_SequenceNr = SequenceNr
+                            ctrl_p71_CommandStatus = 0
+                            ctrl_p71_Data1 =  ControlCommand & 0x00ff
+                            ctrl_p71_Data2 = (ControlCommand & 0xff00) >> 8
+                            ctrl_p71_Data3 = 0xFF
+                            ctrl_p71_Data4 = 0xFF
+
+                            CommandName = ant.CommandName_CTRL.get(ControlCommand, 'Unknown')
+                            logfile.Console(f"ANT+ Control: Received {CommandName} command ({ControlCommand})")
+
+                        # -------------------------------------------------------
+                        # Data page 70 Request data page
+                        # -------------------------------------------------------
+                        elif DataPageNumber == 70:
+                            _SlaveSerialNumber, _DescriptorByte1, _DescriptorByte2, \
+                            _AckRequired, NrTimes, RequestedPageNumber, \
+                            _CommandType = ant.msgUnpage70_RequestDataPage(info)
+
+                            info = False
+                            if RequestedPageNumber == 71:
+                                info = ant.msgPage71_CommandStatus(ant.channel_CTRL, ctrl_p71_LastReceivedCommandID,
+                                                                   ctrl_p71_SequenceNr, ctrl_p71_CommandStatus,
+                                                                   ctrl_p71_Data1, ctrl_p71_Data2, ctrl_p71_Data3,
+                                                                   ctrl_p71_Data4)
+                            else:
+                                error = "Requested page not suported"
+
+                            if info != False:
+                                data = []
+                                d    = ant.ComposeMessage (ant.msgID_BroadcastData, info)
+                                while (NrTimes):
+                                    data.append(d)
+                                    NrTimes -= 1
+                                AntDongle.Write(data, False)
+
+                        #-------------------------------------------------------
+                        # Other data pages
+                        #-------------------------------------------------------
+                        else: error = "Unknown Control data page"
 
                     #-----------------------------------------------------------
                     # Unknown channel

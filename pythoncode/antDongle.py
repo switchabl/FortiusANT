@@ -117,11 +117,13 @@ channel_VTX_s       = channel_VTX # slave=Cycle Training Program
 channel_VHU_s       = 5           # ANT+ Channel for Tacx i-Vortex Headunit
                                   # slave=Cycle Training Program
 
+channel_CTRL        = 6           # ANT+ Channel for Remote Control
+
 #---------------------------------------------------------------------------
 # i-Vortex Headunit modes
 #---------------------------------------------------------------------------
 VHU_Normal          = 0        # Headunit commands the i-Vortex trainer
-VHU_SpecialMode     = 2        # Headunit controls the i-Vortex and 
+VHU_SpecialMode     = 2        # Headunit controls the i-Vortex and
                                #        FortiusANT TargetPower seems ignored.
 VHU_PCmode          = 4        # Headunit only sends buttons to slave (FortiusANT)
 
@@ -133,6 +135,7 @@ DeviceNumber_VTX    = 57593    #
 DeviceNumber_VHU    = 57594    #
 DeviceNumber_SCS    = 57595    #
 DeviceNumber_PWR    = 57596    #
+DeviceNumber_CTRL   = 57597
 
 ModelNumber_FE      = 2875     # short antifier-value=0x8385, Tacx Neo=2875
 SerialNumber_FE     = 19590705 # int   1959-7-5
@@ -145,12 +148,51 @@ SerialNumber_HRM    = 5975     # short 1959-7-5
 HWrevision_HRM      = 1        # char
 SWversion_HRM       = 1        # char
 
+ModelNumber_CTRL     = 1234     # short
+SerialNumber_CTRL    = 19590702 # int   1959-7-2
+HWrevision_CTRL      = 1        # char
+SWrevisionMain_CTRL  = 1        # char
+SWrevisionSupp_CTRL  = 1        # char
+
 ModelNumber_PWR      = 2161     # Garmin Vector 2 (profile.xlsx, garmin_product)
 SerialNumber_PWR     = 19590702 # int   1959-7-2
 HWrevision_PWR       = 1        # char
 SWrevisionMain_PWR   = 1        # char
 SWrevisionSupp_PWR   = 1        # char
 
+#---------------------------------------------------------------------------
+# ANT+ Control command codes
+# D00001307_-_ANT+_Device_Profile_-_Controls_-_2.0.pdf
+# Table 9-8.
+#---------------------------------------------------------------------------
+
+CommandName_CTRL = {
+    0: 'MenuUp',
+    1: 'MenuDown',
+    2: 'MenuSelect',
+    3: 'MenuBack',
+    4: 'Home',
+    32: 'Start',
+    33: 'Stop',
+    34: 'Reset',
+    35: 'Length',
+    36: 'Lap',
+    65535: 'None'
+}
+
+CommandNr_CTRL = {
+    'MenuUp': 0,
+    'MenuDown': 1,
+    'MenuSelect': 2,
+    'MenuBack': 3,
+    'Home': 4,
+    'Start': 32,
+    'Stop': 33,
+    'Reset': 34,
+    'Length': 35,
+    'Lap': 36,
+    'None': 65535
+}
 
 if False:                      # Tacx Neo Erik OT; perhaps relevant for Tacx Desktop App
                                # because TDA does not want to pair with FortiusAnt...
@@ -226,12 +268,14 @@ DeviceTypeID_stride_speed_distance      =124
 Manufacturer_garmin                     =  1
 Manufacturer_dynastream	                = 15
 Manufacturer_tacx                       = 89
-Manufacturer_trainer_road	            =281
+Manufacturer_trainer_road	            = 281
+Manufacturer_dev                        = 0x00FF
 
 DeviceTypeID_FE         = DeviceTypeID_fitness_equipment
 DeviceTypeID_HRM        = DeviceTypeID_heart_rate
 DeviceTypeID_PWR        = DeviceTypeID_bike_power
 DeviceTypeID_SCS        = DeviceTypeID_bike_speed_cadence
+DeviceTypeID_CTRL       = DeviceTypeID_control
 DeviceTypeID_VTX        = 61            # Tacx i-Vortex
                                         # 0x3d  according TotalReverse
 DeviceTypeID_VHU        = 0x3e          # Thanks again to TotalReverse
@@ -261,7 +305,7 @@ class clsAntDongle():
     Message             = ''
     Cycplus             = False
     DongleReconnected   = True
-    
+
     #-----------------------------------------------------------------------
     # _ _ i n i t _ _
     #-----------------------------------------------------------------------
@@ -740,6 +784,20 @@ class clsAntDongle():
             msg60_ChannelTransmitPower  (channel_SCS_s, TransmitPower_0dBm),
             msg4B_OpenChannel           (channel_SCS_s),
             msg4D_RequestMessage        (channel_SCS_s, msgID_ChannelID)
+        ]
+        self.Write(messages)
+
+    def CTRL_ChannelConfig(self, DeviceNumber):
+        logfile.Console ('FortiusANT receives data from an ANT+ Generic Remote Control')
+        if debug.on(debug.Data1): logfile.Write ("CTRL_ChannelConfig()")
+        messages=[
+            msg42_AssignChannel         (channel_CTRL, ChannelType_BidirectionalTransmit, NetworkNumber=0x00),
+            msg51_ChannelID             (channel_CTRL, DeviceNumber, DeviceTypeID_CTRL, TransmissionType_IC),
+            msg45_ChannelRfFrequency    (channel_CTRL, RfFrequency_2457Mhz),
+            msg43_ChannelPeriod         (channel_CTRL, ChannelPeriod=8192),        # 4 Hz
+            msg60_ChannelTransmitPower  (channel_CTRL, TransmitPower_0dBm),
+            msg4B_OpenChannel           (channel_CTRL),
+            msg4D_RequestMessage        (channel_CTRL, msgID_ChannelID)
         ]
         self.Write(messages)
 
@@ -2003,6 +2061,44 @@ def msgPage71_CommandStatus(Channel, LastReceivedCommandID, SequenceNr, CommandS
 
     return info
 
+
+# ------------------------------------------------------------------------------
+# P a g e 7 3 _ G e n e r i c C o m m a n d
+# ------------------------------------------------------------------------------
+# Refer:    https://www.thisisant.com/developer/resources/downloads#documents_tab
+# D00001198_-_ANT+_Common_Data_Pages_Rev_3.1.pdf
+# ------------------------------------------------------------------------------
+def msgPage73_GenericCommand(Channel, SlaveSerialNumber, SlaveManufacturerID, SequencNr, CommandNr):
+    DataPageNumber          = 73
+
+    fChannel                = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber         = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+    fSlaveSerialNumber      = sc.unsigned_short
+    fSlaveManufacturerID    = sc.unsigned_short
+    fSequenceNr             = sc.unsigned_char
+    fCommandNr              = sc.unsigned_short
+
+    format=    sc.no_alignment + fChannel + fDataPageNumber + fSlaveSerialNumber + fSlaveManufacturerID + fSequenceNr +\
+               fCommandNr
+    info  = struct.pack (format,  Channel,   DataPageNumber,   SlaveSerialNumber,   SlaveManufacturerID,   SequencNr,
+                         CommandNr)
+
+    return info
+
+def msgUnpage73_GenericCommand (info):
+    fChannel                = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber         = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+    fSlaveSerialNumber      = sc.unsigned_short
+    fSlaveManufacturerID    = sc.unsigned_short
+    fSequenceNr             = sc.unsigned_char
+    fCommandNr              = sc.unsigned_short
+
+    format=    sc.no_alignment + fChannel + fDataPageNumber + fSlaveSerialNumber + fSlaveManufacturerID + fSequenceNr + \
+               fCommandNr
+    tuple = struct.unpack (format, info)
+
+    return tuple[2], tuple[3], tuple[4], tuple[5]
+
 # ------------------------------------------------------------------------------
 # P a g e 8 0 _ M a n u f a c t u r e r I n f o
 # ------------------------------------------------------------------------------
@@ -2194,3 +2290,32 @@ def msgUnpage_SCS (info):
 
     #      EventTime, CadenceRevolutionCount, EventTime, SpeedRevolutionCount
     return tuple[1],  tuple[2],               tuple[3],  tuple[4]
+
+
+# ------------------------------------------------------------------------------
+# P a g e 2   C o n t r o l
+# ------------------------------------------------------------------------------
+# https://www.thisisant.com/developer/resources/downloads#documents_tab
+# D00001307_-_ANT+_Device_Profile_-_Controls_-_2.0.pdf
+# ------------------------------------------------------------------------------
+def msgPage2_CTRL (Channel, CurrentNotifcations, Reserved1, Reserved2, Reserved3, Reserved4, Reserved5,
+                   DeviceCapabilities):
+    DataPageNumber         = 2
+
+    fChannel                = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber         = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+    fCurrentNotifications   = sc.unsigned_char
+    fReserved1              = sc.unsigned_char
+    fReserved2              = sc.unsigned_char
+    fReserved3              = sc.unsigned_char
+    fReserved4              = sc.unsigned_char
+    fReserved5              = sc.unsigned_char
+    fDeviceCapabilities     = sc.unsigned_char
+
+    format      = sc.no_alignment + fChannel + fDataPageNumber + fCurrentNotifications + fReserved1 + fReserved2 + \
+                  fReserved3 + fReserved4 + fReserved5 + fDeviceCapabilities
+    info        = struct.pack (format, Channel, DataPageNumber, CurrentNotifcations, Reserved1, Reserved2, Reserved3,
+                               Reserved4, Reserved5, DeviceCapabilities)
+
+    return info
+

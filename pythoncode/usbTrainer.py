@@ -138,6 +138,9 @@ else:
 imagic_fw  = os.path.join(dirname, 'tacximagic_1902_firmware.hex')
 fortius_fw = os.path.join(dirname, 'tacxfortius_1942_firmware.hex')
 
+def clamp_gear(gear, cassette):
+    return max(0, min(gear, len(cassette) - 1))
+
 #-------------------------------------------------------------------------------
 # Class inheritance
 # -----------------
@@ -249,12 +252,21 @@ class clsTacxTrainer():
     TargetResistanceFT      = 0             # int       Returned from trainer
     WheelSpeed              = 0             # int
 
+
+    # 2x11 speed shifting
+    Cassette = [28, 25, 23, 21, 19, 17, 15, 14, 13, 12, 11]
+    Chainrings = [34, 50]
+    GearFront = 1
+    GearRear = 6
+    TeethFront = Chainrings[GearFront]
+    TeethRear = Cassette[GearRear]
+    ReferenceGearRatio = 50 / 17
+
     # Other general variables
     clv                     = None          # Command line variables
     PowercurveFactor        = 1             # 1.1 causes higher load
                                             # 0.9 causes lower load
                                             # Is manually set in Grademode
-    Teeth                   = 15            # See Refresh()
 
     # USB devices only:
     Headunit                = 0             # The connected headunit in GetTrainer()
@@ -409,13 +421,42 @@ class clsTacxTrainer():
     def ResetPowercurveFactor(self):
         self.PowercurveFactor   = 1
 
-    def SetPowercurveFactorUp(self):
-        if self.PowercurveFactor < 3:
-            self.PowercurveFactor   *= 1.1
+    #def SetPowercurveFactorUp(self):
+    #    if self.PowercurveFactor < 3:
+    #        self.PowercurveFactor   *= 1.1
 
-    def SetPowercurveFactorDown(self):
-        if self.PowercurveFactor > 0.1:
-            self.PowercurveFactor   /= 1.1
+    #def SetPowercurveFactorDown(self):
+    #    if self.PowercurveFactor > 0.1:
+    #        self.PowercurveFactor   /= 1.1
+
+    def FrontShiftUp(self):
+        self.GearFront = clamp_gear(self.GearFront + 1, self.Chainrings)
+        self.TeethFront = self.Chainrings[self.GearFront]
+        self._UpdatePowercurveFactor()
+
+    def FrontShiftDown(self):
+        self.GearFront = clamp_gear(self.GearFront - 1, self.Chainrings)
+        self.TeethFront = self.Chainrings[self.GearFront]
+        self._UpdatePowercurveFactor()
+
+    def FrontShiftToggle(self):
+        self.GearFront = clamp_gear(self.GearFront ^ 1, self.Chainrings)
+        self.TeethFront = self.Chainrings[self.GearFront]
+        self._UpdatePowercurveFactor()
+
+    def RearShiftUp(self):
+        self.GearRear = clamp_gear(self.GearRear + 1, self.Cassette)
+        self.TeethRear = self.Cassette[self.GearRear]
+        self._UpdatePowercurveFactor()
+
+    def RearShiftDown(self):
+        self.GearRear = clamp_gear(self.GearRear - 1, self.Cassette)
+        self.TeethRear = self.Cassette[self.GearRear]
+        self._UpdatePowercurveFactor()
+
+    def _UpdatePowercurveFactor(self):
+        self.PowercurveFactor = (self.TeethFront / self.TeethRear) / self.ReferenceGearRatio
+        if debug.on(debug.Function):  logfile.Write("Powercurve factor (%f)" % self.PowercurveFactor)
 
     def SetPower(self, Power):
         if debug.on(debug.Function):logfile.Write ("SetPower(%s)" % Power)
@@ -564,24 +605,9 @@ class clsTacxTrainer():
         self.SpeedKmh            = round(self.SpeedKmh,1)
         self.VirtualSpeedKmh     = round(self.VirtualSpeedKmh,1)
 
-        # ----------------------------------------------------------------------
-        # Show the virtual cassette, calculated from a 10 teeth sprocket
-        # If PowercurveFactor = 1  : 15 teeth
-        # If PowercurveFactor = 0.9: 14 teeth
-        # Limit of PowercurveFactor is done at the up/down button
-        # 15 is choosen so that when going heavier, first 14,12,11 teeth is
-        #     shown. Numbers like 5,4,3 would be irrealistic in real world.
-        #     Of course the number of teeth is a reference number.
-        #
-        # Set FortiusAntGui.py OnPaint() for details.
-        #       PowercurveFactor = 0.1 = 150 teeth
-        #       PowercurveFactor = 0.5 =  30 teeth
-        #       PowercurveFactor = 1.0 =  15 teeth
-        #       PowercurveFactor = 2.0 =   8 teeth
-        #       PowercurveFactor = 3.0 =   5 teeth
-        # ----------------------------------------------------------------------
-        self.Teeth = int(15 / self.PowercurveFactor)
-            
+        self.TeethFront = self.Chainrings[self.GearFront]
+        self.TeethRear = self.Cassette[self.GearRear]
+
         #-----------------------------------------------------------------------
         # Then send the results to the trainer again
         #-----------------------------------------------------------------------
@@ -1208,7 +1234,10 @@ class clsTacxUsbTrainer(clsTacxTrainer):
                 Weight = 0x0a                                   # Small flywheel in ERGmode
             elif self.TargetMode == mode_Grade:
                 Target = self.TargetResistance
-                Weight = self.UserAndBikeWeight
+                #Weight = self.UserAndBikeWeight
+
+                # adjust flywheel according to gear
+                Weight = max(0x0a, int(self.PowercurveFactor * self.UserAndBikeWeight))
             else:
                 error = "SendToTrainer; Unsupported TargetMode %s" % self.TargetMode
 

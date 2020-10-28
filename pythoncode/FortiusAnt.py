@@ -161,7 +161,8 @@ class clsFortiusAntConsole:
             self.RunningSwitch = True
             Tacx2Dongle(self)
 
-    def SetValues(self, fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate, iTeeth):
+    def SetValues(self, fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate, iTeethFront,
+                  iTeethRear):
         # ----------------------------------------------------------------------
         # Console: Update current readings, once per second
         # ----------------------------------------------------------------------
@@ -177,8 +178,9 @@ class clsFortiusAntConsole:
                     sTarget += "(%iW)" % iTargetPower        # Target power added for reference
             else:
                 sTarget = "None"
-            msg = "Target=%s Speed=%4.1fkmh hr=%3.0f Current=%3.0fW Cad=%3.0f r=%4.0f T=%3.0f" % \
-                  (  sTarget,    fSpeed,  iHeartRate,       iPower,     iRevs,  iTacx, int(iTeeth) )
+            msg = "Target=%s Speed=%4.1fkmh hr=%3.0f Current=%3.0fW Cad=%3.0f r=%4.0f Tf=%3.0f Tr=%3.0f" % \
+                  (  sTarget,    fSpeed,  iHeartRate,       iPower,     iRevs,  iTacx, int(iTeethFront),
+                     int(iTeethRear))
             logfile.Console (msg)
 
     def SetMessages(self, Tacx=None, Dongle=None, HRM=None):
@@ -250,7 +252,7 @@ class frmFortiusAntChild(gui.frmFortiusAntGui):
             elif cmd == cmd_StopButton:
                 pass
             elif cmd == cmd_SetValues:
-                self.SetValues(rtn[0], rtn[1], rtn[2], rtn[3], rtn[4], rtn[5], rtn[6], rtn[7], rtn[8])# rtn is tuple
+                self.SetValues(rtn[0], rtn[1], rtn[2], rtn[3], rtn[4], rtn[5], rtn[6], rtn[7], rtn[8], rtn[9])# rtn is tuple
             elif cmd == cmd_SetMessages:
                 self.SetMessages(rtn[0], rtn[1], rtn[2])# rtn is (Tacx, Dongle, HRM) tuple
             elif cmd == cmd_PedalStrokeAnalysis:
@@ -342,13 +344,16 @@ class clsFortiusAntParent:
             logfile.Write ("mp-MainRespondToGUI(%s, %s)" % (command, rtn))
         self.app_conn.send((command, rtn))      # Step 3. Main sends the response to GUI
 
-    def SetValues(self, fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate, iTeeth):
+    def SetValues(self, fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate, iTeethFront,
+                  iTeethRear):
         delta = time.time() - self.LastTime     # Delta time since previous call
         if delta >= 1:                          # Do not send faster than once per second
             self.LastTime = time.time()         # Time in seconds
-            if debug.on(debug.MultiProcessing): logfile.Write ("mp-MainDataToGUI(%s, (%s, %s, %s, %s, %s, %s, %s, %s, %s))" % \
-                    (cmd_SetValues, fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate, iTeeth))
-            self.app_conn.send((cmd_SetValues, (fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate, iTeeth)))
+            if debug.on(debug.MultiProcessing): logfile.Write ("mp-MainDataToGUI(%s, (%s, %s, %s, %s, %s, %s, %s, %s, %s %s))" % \
+                    (cmd_SetValues, fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate,
+                     iTeethFront, iTeethRear))
+            self.app_conn.send((cmd_SetValues, (fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx,
+                                                iHeartRate, iTeethFront, iTeethRear)))
 
     def SetMessages(self, Tacx=None, Dongle=None, HRM=None):
         newMessages = (Tacx, Dongle, HRM)

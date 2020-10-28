@@ -160,7 +160,7 @@ class frmFortiusAntGui(wx.Frame):
 		# Load HeartRate image
         # ----------------------------------------------------------------------
         self.HeartRate      = 123
-        self.HeartRateWH    = 40
+        self.HeartRateWH    = 60
                             # 2020-04-07    # 2020-02-07    # 2020-01-25
         self.HeartRateX     = Margin        # 25            # BitmapW - 25 - self.HeartRateWH
         self.HeartRateY     = BitmapH - 50 - self.HeartRateWH
@@ -181,7 +181,8 @@ class frmFortiusAntGui(wx.Frame):
 		# Calculate location of Gearbox image
         # Positioned above HeartRate_img, equally wide/heigh
         # ----------------------------------------------------------------------
-        self.GearboxTeeth  = 0
+        self.GearboxTeethFront = 0
+        self.GearboxTeethRear  = 0
         self.GearboxWH     = self.HeartRateWH
         self.GearboxX      = self.HeartRateX
         self.GearboxY      = self.HeartRateY - self.HeartRateWH - Margin
@@ -694,8 +695,9 @@ class frmFortiusAntGui(wx.Frame):
     # Output:       None
     # --------------------------------------------------------------------------
     def ResetValues(self):
-        self.SetValues(0,0,0,0,0,0,0,0,0)
-    def SetValues(self, fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate, iTeeth):
+        self.SetValues(0,0,0,0,0,0,0,0,0,0)
+    def SetValues(self, fSpeed, iRevs, iPower, iTargetMode, iTargetPower, fTargetGrade, iTacx, iHeartRate, iTeethFront,
+                  iTeethRear):
         # ----------------------------------------------------------------------
         # Average power over the last 10 readings
         # ----------------------------------------------------------------------
@@ -712,9 +714,11 @@ class frmFortiusAntGui(wx.Frame):
             self.HeartRate    = 0
 
         if iTargetMode == mode_Grade:
-            self.GearboxTeeth = iTeeth          # Only valid in Resistance-mode
+            self.GearboxTeethRear = iTeethRear          # Only valid in Resistance-mode
+            self.GearboxTeethFront = iTeethFront
         else:
-            self.GearboxTeeth = 0               # Not valid in PowerMode
+            self.GearboxTeethRear = 0               # Not valid in PowerMode
+            self.GearboxTeethFront = 0               # Not valid in PowerMode
 
         # ----------------------------------------------------------------------
         # Update measurements once per second only (otherwise too much flicker)
@@ -809,11 +813,11 @@ class frmFortiusAntGui(wx.Frame):
         # Show the size of the selected sprocket.
         # The cassette is displayed in OnPaint()!
         # ----------------------------------------------------------------------
-        if self.GearboxTeeth > 0:
+        if self.GearboxTeethRear > 0:
             if not self.txtGearbox.IsShown():
                 self.txtGearbox.Show()
 
-            self.txtGearbox.SetValue  ("%i" % self.GearboxTeeth)
+            self.txtGearbox.SetValue  (f"{self.GearboxTeethFront}/{self.GearboxTeethRear}")
             bRefreshRequired  = True            # So that gearbox is painted
             
         else:
@@ -889,7 +893,7 @@ class frmFortiusAntGui(wx.Frame):
         # Draw 12speed Digital Gearbox with interval of 10% lineair
         # 12speed since 12*3 pixels fits in the 40x40 area we have chosen to use
         # ----------------------------------------------------------------------
-        if self.GearboxTeeth > 0:
+        if self.GearboxTeethRear > 0:
             # Cassette corresponds to the shifting +/- with factor 1.1
             # FortiusANT takes 15 as midpoint,
             # so we have a "realistic" smallest sprocket of 9 teeth
@@ -906,15 +910,16 @@ class frmFortiusAntGui(wx.Frame):
             # I'm curious whether when a question will be raised on this...
             #
             #            1   2   3   4   5   6   7   8   9  10  11  12
-            cassette = [27, 24, 22, 20, 18, 17, 15, 14, 12, 11, 10, 9] # teeth
-            sizes    = [40, 36, 32, 28, 24, 20, 16, 14, 12, 10,  8, 6] # pixels
+            #cassette = [27, 24, 22, 20, 18, 17, 15, 14, 12, 11, 10, 9] # teeth
+            cassette = [28, 25, 23, 21, 19, 17, 15, 14, 13, 12, 11]
+            #sizes    = [40, 36, 32, 28, 24, 20, 16, 14, 12, 10,  8, 6] # pixels
+            sizes    = [40, 36, 32, 28, 24, 20, 16, 14, 12, 10,  8] # pixels
             drawn = False
             
-            for i in range(0,12):
+            for i in range(0,11):
                 teeth=cassette[i]
-                if teeth <= self.GearboxTeeth and not drawn:
+                if teeth == self.GearboxTeethRear:
                     dc.SetPen(wx.Pen(wx.RED))                     # Selected gear
-                    drawn = True
                 else:
                     dc.SetPen(wx.Pen(colorTacxFortius))           # Other gears
 
