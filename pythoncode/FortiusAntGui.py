@@ -160,7 +160,7 @@ class frmFortiusAntGui(wx.Frame):
 		# Load HeartRate image
         # ----------------------------------------------------------------------
         self.HeartRate      = 123
-        self.HeartRateWH    = 60
+        self.HeartRateWH    = 40
                             # 2020-04-07    # 2020-02-07    # 2020-01-25
         self.HeartRateX     = Margin        # 25            # BitmapW - 25 - self.HeartRateWH
         self.HeartRateY     = BitmapH - 50 - self.HeartRateWH
@@ -482,14 +482,14 @@ class frmFortiusAntGui(wx.Frame):
         # ----------------------------------------------------------------------
 		# self.HeartRate, shown to the right of the Heartrate image
         # ----------------------------------------------------------------------
-        self.txtHeartRate = wx.TextCtrl(self, value="123", size=(int(self.HeartRateWH*2),TextCtrlH), style=wx.TE_CENTER | wx.TE_READONLY)
+        self.txtHeartRate = wx.TextCtrl(self, value="123", size=(int(self.HeartRateWH*3),TextCtrlH), style=wx.TE_CENTER | wx.TE_READONLY)
         self.txtHeartRate.SetBackgroundColour(bg)
         self.txtHeartRate.SetPosition(( self.HeartRateX + self.HeartRateWH + Margin, self.HeartRateY))
 
         # ----------------------------------------------------------------------
 		# self.Gearbox, shown to the right of the Gearbox image
         # ----------------------------------------------------------------------
-        self.txtGearbox = wx.TextCtrl(self, value="123", size=(int(self.GearboxWH*2),TextCtrlH), style=wx.TE_CENTER | wx.TE_READONLY)
+        self.txtGearbox = wx.TextCtrl(self, value="123", size=(int(self.GearboxWH*3),TextCtrlH), style=wx.TE_CENTER | wx.TE_READONLY)
         self.txtGearbox.SetBackgroundColour(bg)
         self.txtGearbox.SetPosition(( self.GearboxX + self.GearboxWH + Margin, self.GearboxY))
 
