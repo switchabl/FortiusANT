@@ -1855,21 +1855,26 @@ class clsTacxAntBushidoTrainer(clsTacxAntTrainer):
         if self._DeviceNumber:
             msg = "Tacx Bushido paired: %d" % self._DeviceNumber
             if self.__State == BushidoState.RequestMode:
-                msg += " - Configuring head unit"
-            if self._AlarmStatus & ant.BHU_Alarm_Temperature_5 \
+                if self.__ModeRequested in (ant.VHU_PCmode, ant.VHU_TrainingPause):
+                    msg += " - Configuring head unit"
+                elif self.__ModeRequested == ant.VHU_Training:
+                    msg += " - Pause"
+            if self._AlarmStatus & ant.BHU_Alarm_Temperature_4 \
+                    == ant.BHU_Alarm_Temperature_4 or \
+               self._AlarmStatus & ant.BHU_Alarm_Temperature_5 \
                     == ant.BHU_Alarm_Temperature_5:
-                msg += " TEMPERATURE TOO HIGH!"
+                msg += " TEMPERATURE TOO HIGH! STOP!"
             if self._AlarmStatus & ant.BHU_Alarm_Overvoltage:
-                msg += " OVERVOLTAGE!"
+                msg += " OVERVOLTAGE! STOP!"
             if self._AlarmStatus & ant.BHU_Alarm_Overcurrent_1 or \
                self._AlarmStatus & ant.BHU_Alarm_Overcurrent_2:
-                msg += " OVERCURRENT!"
+                msg += " OVERCURRENT! STOP!"
             if self._AlarmStatus & ant.BHU_Alarm_SpeedTooHigh:
                 msg += " SPEED TOO HIGH!"
             if self._AlarmStatus & ant.BHU_Alarm_Undervoltage:
-                msg += " UNDERVOLTAGE!"
+                msg += " Undervoltage. Speed up!"
             if self._AlarmStatus & ant.BHU_Alarm_CommunicationError:
-                msg += " COMMUNICATION ERROR"
+                msg += " - Waiting for brake"
             self.Message = msg
         else:
             self.Message = "Pair with Tacx Bushido controller (can take a minute)"
@@ -1992,7 +1997,10 @@ class clsTacxAntBushidoTrainer(clsTacxAntTrainer):
                                            Year, DeviceNumber))
 
                         if Mode == self.__ModeRequested:
-                            if Mode == ant.VHU_PCmode:
+                            if Mode == ant.VHU_Normal:
+                                # Stand-alone mode, go to PC-mode
+                                self.__ModeRequested = ant.VHU_PCmode
+                            elif Mode == ant.VHU_PCmode:
                                 # PC connection active, go to training mode
                                 self.__ModeRequested = ant.VHU_TrainingPause
                             elif Mode == ant.VHU_TrainingPause:
