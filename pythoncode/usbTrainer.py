@@ -345,7 +345,11 @@ class clsTacxTrainer():
         if clv.SimulateTrainer: return clsSimulatedTrainer(clv)
         if clv.Tacx_Vortex:     return clsTacxAntVortexTrainer(clv, AntDevice)
         if clv.Tacx_Genius:     return clsTacxAntGeniusTrainer(clv, AntDevice)
-        if clv.Tacx_Bushido:    return clsTacxAntBushidoTrainer(clv, AntDevice)
+        if clv.Tacx_Bushido:
+            if clv.Tacx_BushidoDirect:
+                return clsTacxAntBushidoDirectTrainer(clv, AntDevice)
+            else:
+                return clsTacxAntBushidoTrainer(clv, AntDevice)
 
         #-----------------------------------------------------------------------
         # So we are going to initialize USB
@@ -1299,6 +1303,350 @@ class clsTacxAntVortexTrainer(clsTacxTrainer):
 
         return dataHandled
 
+
+#-------------------------------------------------------------------------------
+# c l s T a c x A n t B u s h i d o D i r e c t T r a i n e r
+#-------------------------------------------------------------------------------
+# Tacx-trainer with ANT connection
+#-------------------------------------------------------------------------------
+class clsTacxAntBushidoDirectTrainer(clsTacxTrainer):
+    def __init__(self, clv, AntDevice):
+        super().__init__(clv, "Pair with Tacx Bushido and Headunit")
+        if debug.on(debug.Function):logfile.Write ("clsTacxAntBushidoDirectTrainer.__init__()")
+        self.AntDevice         = AntDevice
+        self.OK                = True           # The AntDevice is there,
+                                                # the trainer not yet paired!
+        self.__BHUmode = ant.VHU_Normal         # current HU mode
+
+        self.__ResetTrainer()
+
+    def __ResetTrainer(self):
+        self.__AntBSDpaired    = False
+        self.__AntBHUpaired    = False
+        self.__DeviceNumberBSD = 0              # provided by CHANNEL_ID msg
+        self.__DeviceNumberBHU = 0
+
+        self.__Cadence         = 0              # provided by datapage 0
+        self.__CurrentPower    = 0
+        self.__WheelSpeed      = 0
+        self.__SpeedKmh        = 0              #     (from WheelSpeed)
+
+        self.__BushidoButtons  = 0               # provided by datapage 221
+
+        self.__Paused          = False
+
+        self.__BSD_AlarmStatus = 0              # brake errors/warnings (page 1)
+
+        # time of last keep-alive message
+        self.__KeepAliveTime   = time.time()
+
+        self.Message = 'Pair with Tacx Bushido and Headunit'
+
+    #---------------------------------------------------------------------------
+    # R e c e i v e F r o m T r a i n e r
+    #---------------------------------------------------------------------------
+    # input     __data as collected by HandleANTmessage
+    #
+    # function  Now provide data to TacxTrainer
+    #
+    # returns   Buttons, Cadence, CurrentPower, SpeedKmh, Message
+    #
+    #           NOT: HeartRate, TargetResistance, CurrentResistance, PedalEcho
+    #                WheelSpeed
+    #---------------------------------------------------------------------------
+    def _ReceiveFromTrainer(self):
+        # ----------------------------------------------------------------------
+        # Data provided by data pages
+        # ----------------------------------------------------------------------
+        self.Cadence      = self.__Cadence
+        self.CurrentPower = self.__CurrentPower
+        self.WheelSpeed   = self.__WheelSpeed
+
+        self.SpeedKmh     = self.WheelSpeed / 10    # WheelSpeed = in 0.1 km/hr
+
+        # ----------------------------------------------------------------------
+        # Translate Bushido buttons to TacxTrainer.Buttons.
+        # ----------------------------------------------------------------------
+        if   self.__BushidoButtons == ant.VHU_Button_None:  self.Buttons = 0
+        elif self.__BushidoButtons == ant.VHU_Button_Left:  self.Buttons = CancelButton
+        elif self.__BushidoButtons == ant.VHU_Button_Up:    self.Buttons = UpButton
+        elif self.__BushidoButtons == ant.VHU_Button_Enter: self.Buttons = OKButton
+        elif self.__BushidoButtons == ant.VHU_Button_Down:  self.Buttons = DownButton
+        elif self.__BushidoButtons == ant.VHU_Button_Right: self.Buttons = EnterButton
+        self.__BushidoButtons = ant.VHU_Button_None
+
+        # ----------------------------------------------------------------------
+        # Compose displayable message
+        # ----------------------------------------------------------------------
+        if self.__DeviceNumberBSD:
+            msg = 'Tacx Bushido paired: %d' % self.__DeviceNumberBSD
+            if self.__Paused:
+                msg += " - Pause"
+            if self.__BSD_AlarmStatus == ant.BHU_Alarm_Undervoltage:
+                msg += " Undervoltage. Speed up!"
+            self.Message = msg
+        else:
+            self.Message = "Pair with Tacx Bushido"
+            if not self.__DeviceNumberBHU:
+                self.Message += ' and Headunit'
+
+        if self.__DeviceNumberBHU:
+            self.Message += ', Headunit: %d' % self.__DeviceNumberBHU
+
+        if not self.__DeviceNumberBSD:
+            self.Message += ' (start pedaling to wake brake)'
+
+    #---------------------------------------------------------------------------
+    # SendToTrainer()
+    #---------------------------------------------------------------------------
+    def SendToTrainer(self, QuarterSecond, TacxMode):
+        if TacxMode == modeStop:
+            self.__ResetTrainer()                       # Must be paired again!
+
+        if QuarterSecond:
+            messages = []
+            if TacxMode ==  modeResistance:
+                #---------------------------------------------------------------
+                # Set target force
+                # TargetResistance is used, so that virtual gearbox works!
+                #---------------------------------------------------------------
+                if self.__AntBSDpaired:
+                    info = ant.msgPage01_TacxBushidoTargetForce(ant.channel_BSD_s,
+                                self.TargetResistance)
+                    msg  = ant.ComposeMessage (ant.msgID_BroadcastData, info)
+                    messages.append ( msg )
+
+                    if debug.on(debug.Function):
+                        logfile.Write(
+                            "Bushido page 1 (OUT)  Force=%d" % self.TargetResistance)
+
+                #---------------------------------------------------------------
+                # Avoid power off on headunit
+                #---------------------------------------------------------------
+                if self.__AntBHUpaired:
+                    # Head-unit powers off after 3 minutes
+                    KeepAliveInterval = 10  # in s
+                    TimeElapsed = time.time() - self.__KeepAliveTime
+
+                    if TimeElapsed > KeepAliveInterval:
+                        info = ant.msgPage000_TacxVortexHU_StayAlive (ant.channel_BHU_s)
+                        msg  = ant.ComposeMessage (ant.msgID_BroadcastData, info)
+                        messages.append ( msg )
+
+                        if debug.on(debug.Function):
+                            logfile.Write("Bushido HU page 0 (OUT) Keep-alive")
+
+                        # reset keep-alive timer
+                        self.__KeepAliveTime = time.time()
+
+                    # ---------------------------------------------------------------
+                    #  Request PC-mode (repeat until confirmation)
+                    # ---------------------------------------------------------------
+                    elif self.__BHUmode != ant.VHU_PCmode:
+                        info = ant.msgPage172_TacxVortexHU_ChangeHeadunitMode (
+                            ant.channel_BHU_s, ant.VHU_PCmode)
+                        msg  = ant.ComposeMessage (ant.msgID_BroadcastData, info)
+                        messages.append ( msg )
+
+                        if debug.on(debug.Function):
+                            logfile.Write(
+                                "Bushido HU page 172/0x03 (OUT)  Mode=%d" % \
+                                ant.VHU_PCmode)
+
+            elif TacxMode ==  modeStop:
+                #---------------------------------------------------------------
+                # Switch headunit to trainer control mode
+                #---------------------------------------------------------------
+                # TODO: ANT is turned off when training is stopped, so this does not work
+                if self.__AntBHUpaired:
+                    info = ant.msgPage172_TacxVortexHU_ChangeHeadunitMode (
+                                              ant.channel_BHU_s, ant.VHU_Normal)
+                    msg  = ant.ComposeMessage (ant.msgID_BroadcastData, info)
+                    messages.append ( msg )
+
+                    if debug.on(debug.Function):
+                        logfile.Write(
+                            "Bushido HU page 172/0x03 (OUT)  Mode=%d" % \
+                            ant.VHU_Normal)
+
+            #-------------------------------------------------------------------
+            # Send messages, leave receiving to the outer loop
+            #-------------------------------------------------------------------
+            if messages:
+                self.AntDevice.Write(messages, False, False)
+
+    #---------------------------------------------------------------------------
+    # TargetPower2Resistance
+    # The resistance for the Bushido is specified as a force value (0.1N)
+    #---------------------------------------------------------------------------
+    def TargetPower2Resistance(self):
+        if self.SpeedKmh == 0:
+            self.TargetResistance = 0
+        else:
+            self.TargetResistance = int(max(self.TargetPower / (self.SpeedKmh / 3.6) * 10, 0))
+
+    #---------------------------------------------------------------------------
+    # HandleANTmessage()
+    #---------------------------------------------------------------------------
+    def HandleANTmessage(self, msg):
+        _synch, _length, id, info, _checksum, _rest, Channel, DataPageNumber = \
+                                                       ant.DecomposeMessage(msg)
+        SubPageNumber = info[2] if len(info) > 2 else None
+        dataHandled = False
+        messages    = []
+
+        #-----------------------------------------------------------------------
+        # BSD_s = Tacx Bushido trainer
+        #-----------------------------------------------------------------------
+        if Channel == ant.channel_BSD_s:
+            #-------------------------------------------------------------------
+            # BroadcastData - info received from the master device
+            #-------------------------------------------------------------------
+            if id == ant.msgID_BroadcastData:
+                #---------------------------------------------------------------
+                # Trainer connected (again), unpause
+                #---------------------------------------------------------------
+                self.__Paused = False
+
+                #---------------------------------------------------------------
+                # Ask what device is paired
+                #---------------------------------------------------------------
+                if not self.__AntBSDpaired:
+                    msg = ant.msg4D_RequestMessage(ant.channel_BSD_s, ant.msgID_ChannelID)
+                    messages.append ( msg )
+
+                #---------------------------------------------------------------
+                # Data page 01 msgUnpage01_TacxBushidoForcePower
+                #---------------------------------------------------------------
+                if DataPageNumber == 1:
+                    Force1, self.__CurrentPower, Force2 = \
+                        ant.msgUnpage01_TacxBushidoForcePower(info)
+                    if debug.on(debug.Function):
+                        logfile.Write ('Bushido Page=%d (IN) Force1=%d Power=%d Force2=%d' % \
+                            (DataPageNumber, Force1, self.__CurrentPower, Force2) )
+
+                #---------------------------------------------------------------
+                # Data page 02 msgUnpage02_TacxBushidoSpeedCadence
+                #---------------------------------------------------------------
+                elif DataPageNumber == 2:
+                    self.__WheelSpeed, self.__Cadence, Balance = \
+                        ant.msgUnpage02_TacxBushidoSpeedCadence(info)
+                    if debug.on(debug.Function):
+                        logfile.Write ('Bushido Page=%d (IN) Speed=%d Cadence=%d Balance=%d' % \
+                                       (DataPageNumber, self.__WheelSpeed, self.__Cadence, Balance) )
+
+                #---------------------------------------------------------------
+                # Data page 08 msgUnpage08_TacxBushidoDistance
+                #---------------------------------------------------------------
+                elif DataPageNumber == 8:
+                    Distance = ant.msgUnpage08_TacxBushidoDistance(info)
+                    if debug.on(debug.Function):
+                        logfile.Write ('Bushido Page=%d (IN) Distance=%d' % \
+                                       (DataPageNumber, Distance) )
+
+                #---------------------------------------------------------------
+                # Data page 16 msgUnpage16_TacxBushidoAlarm
+                #---------------------------------------------------------------
+                elif DataPageNumber == 16:
+                    Alarm, Temperature = ant.msgUnpage16_TacxBushidoAlarm(info)
+                    if debug.on(debug.Function):
+                        logfile.Write ('Bushido Page=%d (IN) Alarm=%d Temperature=%d' % \
+                            (DataPageNumber, Alarm, Temperature))
+
+            #-------------------------------------------------------------------
+            # ChannelID - the info that a master on the network is paired
+            #-------------------------------------------------------------------
+            elif id == ant.msgID_ChannelID:
+                Channel, DeviceNumber, DeviceTypeID, _TransmissionType = \
+                    ant.unmsg51_ChannelID(info)
+
+                if DeviceTypeID == ant.DeviceTypeID_BSD:
+                    self.__AntBSDpaired    = True
+                    self.__DeviceNumberBSD = DeviceNumber
+
+            # -------------------------------------------------------------------
+            # ChannelResponse / Event -  EVENT_RX_FAIL_GO_TO_SEARCH
+            # Bushido disconnected, pause training
+            # -------------------------------------------------------------------
+            elif id == ant.msgID_ChannelResponse:
+                Channel, MessageID, MessageCode = \
+                    ant.unmsg64_ChannelResponse(info)
+
+                if MessageID == ant.msgID_RF_EVENT and \
+                        MessageCode == ant.msgCode_EventRxFailedGoToSearch:
+                    self.__Paused = True
+
+                    # likely stopped pedaling, set everything to zero
+                    # otherwise will be stuck at current values
+                    self.__Cadence = 0
+                    self.__CurrentPower = 0
+                    self.__WheelSpeed = 0
+
+            #-------------------------------------------------------------------
+            # Outer loop does not need to handle channel_BSD_s messages
+            #-------------------------------------------------------------------
+            dataHandled = True
+
+        #-----------------------------------------------------------------------
+        # BHU_s = Tacx Bushido headunit
+        #-----------------------------------------------------------------------
+        elif Channel == ant.channel_BHU_s:
+            if id == ant.msgID_AcknowledgedData:
+                #---------------------------------------------------------------
+                # Data page 221 TacxVortexHU_ButtonPressed
+                #---------------------------------------------------------------
+                if DataPageNumber == 221:
+                    self.__BushidoButtons = \
+                              ant.msgUnpage221_TacxVortexHU_ButtonPressed (info)
+                    if debug.on(debug.Function):
+                        logfile.Write ('Bushido HU Page=%d (IN) Buttons=%d' % \
+                                       (DataPageNumber, self.__BushidoButtons))
+
+            #-------------------------------------------------------------------
+            # BroadcastData - info received from the master device
+            #-------------------------------------------------------------------
+            elif id == ant.msgID_BroadcastData:
+                #---------------------------------------------------------------
+                # Ask what device is paired
+                #---------------------------------------------------------------
+                if not self.__AntBHUpaired:
+                    msg = ant.msg4D_RequestMessage(ant.channel_BHU_s, ant.msgID_ChannelID)
+                    messages.append ( msg )
+
+                #---------------------------------------------------------------
+                # Data page 173 containing the serial number/mode of the device
+                #---------------------------------------------------------------
+                if DataPageNumber == 173 and SubPageNumber == 0x01: # 0xad:
+                    self.__BHUmode, Year, DeviceType, DeviceNumber = \
+                        ant.msgUnpage173_01_TacxVortexHU_SerialMode (info)
+                    if debug.on(debug.Function):
+                        logfile.Write ('Bushido HU Page=%d/%#x (IN) Mode=%d Year=%d DeviceType=%d DeviceNumber=%d' % \
+                                       (DataPageNumber, SubPageNumber, self.__BHUmode, Year,
+                                        DeviceType, DeviceNumber))
+
+            #-------------------------------------------------------------------
+            # ChannelID - the info that a master on the network is paired
+            #-------------------------------------------------------------------
+            elif id == ant.msgID_ChannelID:
+                Channel, DeviceNumber, DeviceTypeID, _TransmissionType = \
+                    ant.unmsg51_ChannelID(info)
+
+                if DeviceTypeID == ant.DeviceTypeID_BHU:
+                    self.__AntBHUpaired    = True
+                    self.__DeviceNumberBHU = DeviceNumber
+
+            #-------------------------------------------------------------------
+            # Outer loop does not need to handle channel_BHU_s messages
+            #-------------------------------------------------------------------
+            dataHandled = True
+
+        #-----------------------------------------------------------------------
+        # Send messages, leave receiving to the outer loop
+        #-----------------------------------------------------------------------
+        if messages:
+            self.AntDevice.Write(messages, False, False)
+
+        return dataHandled
 
 #-------------------------------------------------------------------------------
 # c l s T a c x A n t T r a i n e r

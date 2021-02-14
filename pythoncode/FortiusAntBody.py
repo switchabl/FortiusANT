@@ -686,9 +686,20 @@ def Tacx2DongleSub(self, Restart):
     if clv.Tacx_Bushido:
         #-------------------------------------------------------------------
         # Create ANT slave channel for BHU
-        # No pairing-loop: GNS perhaps not yet active and avoid delay
+        # No pairing-loop: BHU perhaps not yet active and avoid delay
+        #
+        # in direct mode BHU is optional, so pairing in low-priority
+        # mode to avoid interfering with brake
         #-------------------------------------------------------------------
-        AntDongle.SlaveBHU_ChannelConfig(0)
+        HighPrioritySearch = not clv.Tacx_BushidoDirect
+        AntDongle.SlaveBHU_ChannelConfig(0, HighPrioritySearch)
+
+    if clv.Tacx_BushidoDirect:
+        #-------------------------------------------------------------------
+        # Create ANT slave channel for BSD
+        # No pairing-loop: BSD perhaps not yet active and avoid delay
+        #-------------------------------------------------------------------
+        AntDongle.SlaveBSD_ChannelConfig(0)
 
     if True:
         #-------------------------------------------------------------------

@@ -102,6 +102,7 @@ class CommandLineVariables(object):
     Tacx_Vortex     = False
     Tacx_Genius     = False
     Tacx_Bushido    = False
+    Tacx_BushidoDirect = False
     Tacx_MotorBrake = False
     Tacx_MagneticBrake = False
 
@@ -171,7 +172,7 @@ class CommandLineVariables(object):
 #scs    parser.add_argument   ('-S','--scs',                help=constants.help_S,  required=False, default=False)
         parser.add_argument   ('-T','--Transmission',       help=constants.help_T,  required=False, default=False)
 
-        self.ant_tacx_models = ['Bushido', 'Genius', 'Vortex', 'Magneticbrake', 'Motorbrake']
+        self.ant_tacx_models = ['Bushido', 'BushidoDirect', 'Genius', 'Vortex', 'Magneticbrake', 'Motorbrake']
         ant_tacx_help = constants.help_t \
                       + ' Allowed values are: %s' % ', '.join(self.ant_tacx_models)
         parser.add_argument('-t', '--TacxType',             help=ant_tacx_help, metavar='', required=False, default=False, \
@@ -347,6 +348,9 @@ class CommandLineVariables(object):
                 self.Tacx_Vortex = True
             elif 'Genius' in  self.TacxType:
                 self.Tacx_Genius = True
+            elif 'BushidoDirect' in self.TacxType:
+                self.Tacx_Bushido = True
+                self.Tacx_BushidoDirect = True
             elif 'Bushido' in self.TacxType:
                 self.Tacx_Bushido = True
             elif 'Magneticbrake' in self.TacxType:

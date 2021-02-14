@@ -119,14 +119,16 @@ channel_PWR         = 2           # ANT+ Channel for Power Profile
 channel_SCS         = 3           # ANT+ Channel for Speed Cadence Sensor
 channel_SCS_s       = channel_SCS # slave=display or Cycle Training Program
 
-channel_VTX         = 4           # ANT+ Channel for Tacx i-Vortex
+channel_VTX         = 4           # ANT Channel for Tacx i-Vortex
 channel_VTX_s       = channel_VTX # slave=Cycle Training Program
 
-channel_VHU_s       = 5           # ANT+ Channel for Tacx i-Vortex Headunit
+channel_VHU_s       = 5           # ANT Channel for Tacx i-Vortex Headunit
                                   # slave=Cycle Training Program
-channel_GNS_s       = channel_VHU_s # ANT+ Channel for Tacx Genius
+channel_GNS_s       = channel_VHU_s # ANT Channel for Tacx Genius
 
-channel_BHU_s       = channel_VHU_s # ANT+ Channel for Tacx Buhsido Headunit
+channel_BSD_s       = channel_VTX_s # ANT Channel for Tacx Bushido brake
+
+channel_BHU_s       = channel_VHU_s # ANT Channel for Tacx Bushido Headunit
 
 channel_CTRL        = 6           # ANT+ Channel for Remote Control
 #---------------------------------------------------------------------------
@@ -282,6 +284,15 @@ msgID_StartUp                           = 0x6f
 
 msgID_BurstData                         = 0x50
 
+# Message codes (Channel Response/Event 9.5.6.1)
+msgCode_ResponseNoError                 = 0x00
+msgCode_EventRxSearchTimeout            = 0x01
+msgCode_EventRxFail                     = 0x02
+msgCode_EventTx                         = 0x03
+msgCode_EventChannelClosed              = 0x07
+msgCode_EventRxFailedGoToSearch         = 0x08
+msgCode_EventChannelCollision           = 0x09
+
 # profile.xlsx: antplus_device_type
 DeviceTypeID_antfs                      =  1
 DeviceTypeID_bike_power                 = 11
@@ -323,6 +334,7 @@ DeviceTypeID_CTRL       = DeviceTypeID_control
 DeviceTypeID_VTX        = 61            # Tacx i-Vortex
 DeviceTypeID_GNS        = 83            # Tacx Genius
 DeviceTypeID_BHU        = 82            # Tacx Bushido head unit
+DeviceTypeID_BSD        = 81            # Tacx Bushido brake
 # 0x3d  according TotalReverse
 DeviceTypeID_VHU        = 0x3e          # Thanks again to TotalReverse
 # https://github.com/WouterJD/FortiusANT/issues/46#issuecomment-616838329
@@ -921,7 +933,24 @@ class clsAntDongle():
         ]
         self.Write(messages)
 
-    def SlaveBHU_ChannelConfig(self, DeviceNumber):     # Listen to a Tacx Genius
+    def SlaveBSD_ChannelConfig(self, DeviceNumber):     # Listen to a Tacx Bushido brake
+        if DeviceNumber > 0: s = ", id=%s only" % DeviceNumber
+        else:                s = ", any device"
+        logfile.Console ('FortiusANT receives data from an ANT Tacx Bushido brake (BSD Brake)' + s)
+        if debug.on(debug.Data1): logfile.Write ("SlaveBSD_ChannelConfig()")
+        messages=[
+            msg42_AssignChannel         (channel_BSD_s, ChannelType_BidirectionalReceive, NetworkNumber=0x01),
+            msg51_ChannelID             (channel_BSD_s, DeviceNumber, DeviceTypeID_BSD, TransmissionType_IC),
+            msg45_ChannelRfFrequency    (channel_BSD_s, RfFrequency_2460Mhz),
+            msg43_ChannelPeriod         (channel_BSD_s, ChannelPeriod=0x1000),
+            msg60_ChannelTransmitPower  (channel_BSD_s, TransmitPower_0dBm),
+            msg44_ChannelSearchTimeout  (channel_BSD_s, 255),  # keep searching indefinitely
+            msg4B_OpenChannel           (channel_BSD_s),
+            msg4D_RequestMessage        (channel_BSD_s, msgID_ChannelID)
+        ]
+        self.Write(messages)
+
+    def SlaveBHU_ChannelConfig(self, DeviceNumber, HighPriority):     # Listen to a Tacx Bushido Headunit
         if DeviceNumber > 0: s = ", id=%s only" % DeviceNumber
         else:                s = ", any device"
         logfile.Console ('FortiusANT receives data from an ANT Tacx Bushido head unit (BHU Controller)' + s)
@@ -932,7 +961,9 @@ class clsAntDongle():
             msg45_ChannelRfFrequency    (channel_GNS_s, RfFrequency_2460Mhz),
             msg43_ChannelPeriod         (channel_GNS_s, ChannelPeriod=0x1000),
             msg60_ChannelTransmitPower  (channel_GNS_s, TransmitPower_0dBm),
-            msg44_ChannelSearchTimeout  (channel_GNS_s, 255),  # keep searching indefinitely
+            # search indefinitely (either high- or low priority search)
+            (msg44_ChannelSearchTimeout  (channel_GNS_s, 255) if HighPriority else
+            msg63_ChannelLowPrioritySearchTimeout(channel_GNS_s, 255)),
             msg4B_OpenChannel           (channel_GNS_s),
             msg4D_RequestMessage        (channel_GNS_s, msgID_ChannelID)
         ]
@@ -1209,7 +1240,7 @@ def DongleDebugMessage(text, d):
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# A N T   M e s s a g e   42   A s s i g n C h a n n e l
+# A N T   M e s s a g e   41   U n a s s i g n C h a n n e l
 # ------------------------------------------------------------------------------
 def msg41_UnassignChannel(ChannelNumber):
     format  =    sc.no_alignment + sc.unsigned_char
@@ -1239,7 +1270,7 @@ def msg43_ChannelPeriod(ChannelNumber, ChannelPeriod):
 # A N T   M e s s a g e   44   C h a n n e l S e a r c h T i m e o u t
 # ------------------------------------------------------------------------------
 def msg44_ChannelSearchTimeout(ChannelNumber, SearchTimeout):
-    format  =    sc.no_alignment + sc.unsigned_char + sc.unsigned_short
+    format  =    sc.no_alignment + sc.unsigned_char + sc.unsigned_char
     info    = struct.pack(format,  ChannelNumber,     SearchTimeout)
     msg     = ComposeMessage (0x44, info)
     return msg
@@ -1317,6 +1348,15 @@ def msg60_ChannelTransmitPower(ChannelNumber, TransmitPower):
     format  =    sc.no_alignment + sc.unsigned_char + sc.unsigned_char
     info    = struct.pack(format,  ChannelNumber,     TransmitPower)
     msg     = ComposeMessage (0x60, info)
+    return msg
+
+# ------------------------------------------------------------------------------
+# A N T   M e s s a g e   63   ChannelLowPrioritySearchTimeout
+# ------------------------------------------------------------------------------
+def msg63_ChannelLowPrioritySearchTimeout(ChannelNumber, SearchTimeout):
+    format  =    sc.no_alignment + sc.unsigned_char + sc.unsigned_char
+    info    = struct.pack(format,  ChannelNumber,     SearchTimeout)
+    msg     = ComposeMessage (0x63, info)
     return msg
 
 # ------------------------------------------------------------------------------
@@ -1803,6 +1843,31 @@ def msgUnpage221_TacxVortexHU_ButtonPressed (info):
 
     return tuple[nButton]
 
+# -------------------------------------------------------------------------------------
+# P a g e 1 7 3  ( 0 x 0 1 )  T a c x V o r t e x S e r i a l M o d e
+# -------------------------------------------------------------------------------------
+def msgUnpage173_01_TacxVortexHU_SerialMode (info):
+    fChannel            = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber     = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+    fSubPageNumber      = sc.unsigned_char  # == 0x01
+
+    fMode               = sc.unsigned_char  # head-unit mode
+    nMode               = 3
+    fYear               = sc.unsigned_char  # production year
+    nYear               = 4
+    fDeviceType         = sc.unsigned_char  # device type id
+    nDeviceType         = 5
+    fDeviceNumber       = '3' + sc.char_array  # device number
+    nDeviceNumber       = 6
+
+    format = sc.big_endian + fChannel + fDataPageNumber + fSubPageNumber + \
+             fMode + fYear + fDeviceType + fDeviceNumber
+    tuple = struct.unpack(format, info)
+
+    deviceNumber = int.from_bytes(tuple[nDeviceNumber], byteorder='big')
+
+    return tuple[nMode], tuple[nYear], tuple[nDeviceType], deviceNumber
+
 # ------------------------------------------------------------------------------
 # T a c x  G e n i u s  p a g e s
 # ------------------------------------------------------------------------------
@@ -1957,6 +2022,104 @@ def msgUnpage221_04_TacxGeniusCalibrationInfo (info):
     tuple = struct.unpack(format, info)
 
     return tuple[nCalibrationState], tuple[nCalibrationValue]
+
+# ------------------------------------------------------------------------------
+# T a c x  B u s h i d o  p a g e s
+# ------------------------------------------------------------------------------
+# Refer:    https://gist.github.com/switchabl/75b2619e2e3381f49425479d59523ead
+# ------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------------
+# P a g e 0 1  T a c x B u s h i d o F o r c e P o w e r
+# -------------------------------------------------------------------------------------
+def msgUnpage01_TacxBushidoForcePower (info):
+    fChannel            = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber     = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+
+    fForce1             = sc.unsigned_short # force?
+    nForce1             = 2
+    fPower              = sc.unsigned_short # power (W)
+    nPower              = 3
+    fForce2             = sc.unsigned_short            # force?
+    nForce2             = 4
+    fPadding            = sc.pad
+
+    format = sc.big_endian + fChannel + fDataPageNumber + fForce1 + \
+             fPower + fForce2 + fPadding
+    tuple = struct.unpack(format, info)
+
+    return tuple[nForce1], tuple[nPower], tuple[nForce2]
+
+# -------------------------------------------------------------------------------------
+# P a g e 0 2  T a c x B u s h i d o S p e e d C a d e n c e
+# -------------------------------------------------------------------------------------
+def msgUnpage02_TacxBushidoSpeedCadence (info):
+    fChannel            = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber     = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+
+    fSpeed              = sc.unsigned_short # speed (km/h) * 10
+    nSpeed              = 2
+    fCadence            = sc.unsigned_char  # cadence (rpm)
+    nCadence            = 3
+    fBalance            = sc.unsigned_char  # balance (%)
+    nBalance            = 4
+    fPadding            = 3 * sc.pad
+
+    format = sc.big_endian + fChannel + fDataPageNumber + fSpeed + \
+             fCadence + fBalance + fPadding
+    tuple = struct.unpack(format, info)
+
+    return tuple[nSpeed], tuple[nCadence], tuple[nBalance]
+
+# -------------------------------------------------------------------------------------
+# P a g e 0 8  T a c x B u s h i d o D i s t a n c e
+# -------------------------------------------------------------------------------------
+def msgUnpage08_TacxBushidoDistance (info):
+    fChannel            = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber     = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+
+    fDistance           = sc.unsigned_int   # Distance (m)
+    nDistance           = 2
+    fPadding            = 3 * sc.pad
+
+    format = sc.big_endian + fChannel + fDataPageNumber + fDistance + fPadding
+    tuple = struct.unpack(format, info)
+
+    return tuple[nDistance]
+
+# -------------------------------------------------------------------------------------
+# P a g e 1 6  T a c x B u s h i d o A l a r m
+# -------------------------------------------------------------------------------------
+def msgUnpage16_TacxBushidoAlarm (info):
+    fChannel            = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber     = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+
+    fAlarm              = sc.unsigned_short # alarm bitmask
+    nAlarm              = 2
+    fTemperature        = sc.unsigned_char
+    nTemperature        = 3
+    fPadding            = 4 * sc.pad
+
+    format = sc.big_endian + fChannel + fDataPageNumber + fAlarm + fTemperature + fPadding
+    tuple = struct.unpack(format, info)
+
+    return tuple[nAlarm], tuple[nTemperature]
+
+# ------------------------------------------------------------------------------
+# P a g e 0 1  T a c x B u s h i d o T ar g e t F o r c e
+# ------------------------------------------------------------------------------
+def msgPage01_TacxBushidoTargetForce (Channel, Force):
+    DataPageNumber      = 1
+
+    fChannel            = sc.unsigned_char  # First byte of the ANT+ message content
+    fDataPageNumber     = sc.unsigned_char  # First byte of the ANT+ datapage (payload)
+    fForce              = sc.unsigned_short # Target Force (N) * 10
+    fPadding            = sc.pad * 5
+
+    format = sc.big_endian +     fChannel + fDataPageNumber + fForce + fPadding
+    info   = struct.pack (format, Channel,   DataPageNumber,   Force)
+
+    return info
 
 # -------------------------------------------------------------------------------------
 # P a g e 1 7 3  ( 0 x 0 1 )  T a c x B u s h i d o S e r i a l M o d e
